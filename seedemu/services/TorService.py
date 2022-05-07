@@ -403,7 +403,7 @@ class TorServer(Server):
         for dir in tor.getDirAuthority():
             download_commands += TorServerFileTemplates["downloader"].format(da_addr=dir)
 
-        node.addSoftware("git python3")
+        node.addSoftware("git python3 nyx")
         node.addBuildCommand(BUILD_COMMANDS)
 
         node.setFile("/etc/tor/torrc", TorServerFileTemplates["torrc"])
@@ -417,10 +417,20 @@ class TorServer(Server):
         node.appendStartCommand("export ROLE={}".format(self.__role))
         node.appendStartCommand("chmod +x /usr/local/bin/tor-entrypoint /usr/local/bin/da_fingerprint")
         node.appendStartCommand("mkdir /tor")
+
+        node.setFile("/tor.py", open('./tor.py', 'r').read())
+        node.setFile("/seedemu_worker", open('./seedemu_worker', 'r').read())
+        node.appendStartCommand("chmod +x /tor.py")
+        node.appendStartCommand("chmod +x /seedemu_worker")
+
+        role = self.getRole()
        
         # If node role is DA, launch a python webserver for other node to download fingerprints.
-        if self.getRole() == "DA":
+        if role == "DA":
             node.appendStartCommand("python3 -m http.server 8888 -d /tor", True)
+
+        if role == "CLIENT":
+            node.addSoftware("proxychains telnet ftp")
         
         node.appendStartCommand("tor-entrypoint")
         node.appendStartCommand("tor -f /etc/tor/torrc")

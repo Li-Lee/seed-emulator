@@ -1,4 +1,4 @@
-import { DataSet } from 'vis-data';
+import { DataSet, DataView } from 'vis-data';
 import { Network } from 'vis-network';
 import { bpfCompletionTree } from '../common/bpf';
 import { Completion } from '../common/completion';
@@ -99,6 +99,12 @@ export class MapUi {
     private _nodes: DataSet<Vertex, 'id'>;
     private _edges: DataSet<Edge, 'id'>;
     private _graph: Network;
+
+    private _nodesView: DataView<Vertex, 'id'>;
+    private _edgesView: DataView<Edge, 'id'>;
+    private _nodesFilter: (Vertex) => boolean;
+    private _edgesFilter: (Edge) => boolean;
+    private _edgesFilterValues: { [key: string]: boolean };
 
     /** list of log elements to be rendered to log body */
     private _logQueue: HTMLElement[];
@@ -420,7 +426,22 @@ export class MapUi {
 
             this._logQueue.push(tr);
         });
+
+        this._edgesFilterValues = {};
+
+        this._nodesFilter = (node) => {
+            return true;
+        };
+
+        this._edgesFilter = (edge) => {
+            if (edge.label.startsWith('tor_circuit')) {
+                return this._edgesFilterValues[edge.label];
+            }
+
+            return true;
+        };
     }
+
 
     /**
      * get a random color.
@@ -477,6 +498,7 @@ export class MapUi {
 
         this._nodes.update(updateRequest);
     }
+
 
     /**
      * flash all nodes in the flash queue and schedule un-flash.
@@ -974,6 +996,128 @@ export class MapUi {
                 infoPlate.appendChild(bgpDetails);
             }
 
+
+	        // Grey out non-Tor nodes.
+            if (node.meta.emulatorInfo.displayname != null 
+		          && node.meta.emulatorInfo.displayname.startsWith('Tor-')) {
+
+                let updateRequest = [];
+                this._nodes.forEach(node => {
+                    const nodeObj = (node.object as EmulatorNode);
+                    
+                    if (nodeObj.meta.emulatorInfo.displayname == null 
+			|| !nodeObj.meta.emulatorInfo.displayname.startsWith('Tor-')) {
+                        updateRequest.push({ id: node.id, color: 'grey' });
+                    }
+                });
+
+                this._nodes.update(updateRequest);
+            }
+
+    	    if (node.meta.emulatorInfo.displayname != null && node.meta.emulatorInfo.displayname.startsWith('Tor-client')) {
+
+    	    	const torDetails = document.createElement('div');
+                torDetails.classList.add('section');
+
+                const torTitle = document.createElement('div');
+                torTitle.className = 'title';
+                torTitle.innerText = 'Tor Client Information';
+
+                const circsInfo = document.createElement('div');
+
+                let circsDataString = await this._datasource.getTorCircuits(node.Id);
+                let circsData = JSON.parse(circsDataString);
+
+                let circCheckboxes = [];
+
+                const edge_width = 2.5;
+
+                circsData.forEach(d => {
+                    const circ_id = d.id;
+                    
+                    const circ = document.createElement('div');
+                    const circCheckbox = document.createElement('input');
+
+                    circCheckbox.type = 'checkbox';
+                    circCheckbox.value = 'tor_circuit_' + circ_id;
+                    circCheckbox.checked = false;
+                    circ.append(circCheckbox);
+                    circCheckboxes.push(circCheckbox);
+                    
+                    const circLabel = document.createElement('span');
+                    circLabel.className = 'circuit-label';
+                    circLabel.appendChild(document.createTextNode('circuit ' + circ_id));
+                    circ.append(circLabel);
+
+                    const circPurpose = document.createElement('span');
+                    circPurpose.appendChild(document.createTextNode('(' + d.purpose + ')'));
+                    circ.append(circPurpose);
+
+                    let circAction = document.createElement('a');
+                    circAction.href = '#';
+                    circAction.classList.add('inline-action-link');
+                    circAction.innerText = 'Close';
+                    circAction.onclick = async () => {
+                        await this._datasource.updateTorCircuit(node.Id, circ_id, 'close');
+                        window.setTimeout(() => {
+                            this._updateInfoPlateWith(node.Id);
+                        }, 100);
+                    };
+
+                    circ.appendChild(circAction);
+
+                    let circEdges = [];
+                    const circColor = `hsl(${(circ_id * 100) % 360}, 100%, 25%)`;
+
+                    d.paths.forEach(p => {
+                        const edgeFrom = this._findNodes(p.from)[0].id;
+                        const edgeTo = this._findNodes(p.to)[0].id;
+                        const edgeLabel = circCheckbox.value;
+
+                        // Avoid adding the same edge to the data set.
+                        if (this._edges.get({filter: item => item.from == edgeFrom 
+			                                      && item.to == edgeTo 
+					                      && item.label == edgeLabel}).length == 0) {
+
+                            circEdges.push({from: edgeFrom, 
+					    to: edgeTo, 
+					    arrows: 'to', 
+					    label: edgeLabel, 
+					    dashes: true, 
+					    color: { color: circColor }, 
+					    physics: false, 
+					    width: edge_width, 
+					    smooth: { enabled: true, type: 'curvedCW' }}); 
+                        }
+                    });
+
+                    this._edges.add(circEdges);
+
+                    circsInfo.appendChild(circ);
+                });
+
+                circCheckboxes.forEach(b => {
+                    b.addEventListener("change", (e) => {
+                        const { value, checked } = (<HTMLInputElement>e.target);
+                        this._edgesFilterValues[value] = checked;
+                        this._edgesView.refresh();
+                        this._highlightCircNodes(circCheckboxes);
+                        this._updateCheckboxTextColor(e.currentTarget);
+                    });
+
+                    // Fetch the correct state of checkboxes after the node is reselected.
+                    b.checked = (this._edgesView.get({filter: item => item.label.startsWith(b.value)}).length != 0);
+                    
+                    // Set correct color for checkbox text
+                    this._updateCheckboxTextColor(b);
+                });
+
+            
+                torDetails.appendChild(torTitle);
+                torDetails.appendChild(circsInfo);
+                infoPlate.appendChild(torDetails);
+            }
+
             let actions = document.createElement('div');
             actions.classList.add('section');
 
@@ -1032,6 +1176,67 @@ export class MapUi {
         this._infoPlateElement.innerText = '';
         this._infoPlateElement.appendChild(infoPlate);
         this._infoPlateElement.classList.remove('loading');
+    }
+
+    private _highlightCircNodes(checkboxes: HTMLInputElement[]) {
+
+        let selectedNodesIds = new Set<string>();
+
+        checkboxes.forEach(c => {
+            if (c.checked) {
+                const circEdges = this._edges.get({fields: ['from', 'to'], filter: item => item.label === c.value});
+                circEdges.forEach(e => {
+                    selectedNodesIds.add(e.from).add(e.to);
+                });
+            }
+        });
+
+        const unselectedNodesIds = new Set([...new Set(this._nodes.getIds())].filter(x => !selectedNodesIds.has(<string>x)));
+
+        let updateRequest = [];
+
+        const sizeofSelected = 25;
+        let sizeOfUnselected = 10;
+
+        selectedNodesIds.forEach(n => {
+            updateRequest.push({
+                id: n, borderWidth: 4, size: sizeofSelected
+            });
+        });
+
+        // No node selected, resume all nodes to the original size.
+        if (selectedNodesIds.size == 0) sizeOfUnselected = sizeofSelected;
+
+        unselectedNodesIds.forEach(n => {
+            updateRequest.push({
+                id: n, borderWidth: 1, size: sizeOfUnselected
+            });
+        });
+
+
+        // Grey out non-tor nodes.
+        this._nodes.forEach(node => {
+            const nodeObj = (node.object as EmulatorNode);
+            
+            if (nodeObj.meta.emulatorInfo.displayname == null || !nodeObj.meta.emulatorInfo.displayname.startsWith('Tor')) {
+                updateRequest.push({ id: node.id, color: 'grey' });
+            }
+        });
+
+        this._nodes.update(updateRequest);
+    }
+
+    private _updateCheckboxTextColor(checkbox: HTMLInputElement) {
+        let textColor = `hsl(0, 0%, 0%)`;
+        let textWeight = 'normal';
+        if (checkbox.checked) {
+            const temp = checkbox.value.split('_');
+            const circ_id = Number(temp[temp.length - 1]);
+            textColor = `hsl(${(circ_id * 100) % 360}, 100%, 25%)`;
+            textWeight = 'bold';
+        }
+        (<HTMLElement>checkbox.nextElementSibling).style.color = textColor;
+        (<HTMLElement>checkbox.nextElementSibling).style.fontWeight = textWeight;
     }
 
     /**
@@ -1310,6 +1515,9 @@ export class MapUi {
         this._edges = new DataSet(this._datasource.edges);
         this._nodes = new DataSet(this._datasource.vertices);
 
+        this._nodesView = new DataView(this._nodes, { filter: this._nodesFilter });
+        this._edgesView = new DataView(this._edges, { filter: this._edgesFilter });
+
         var groups = {};
 
         this._datasource.groups.forEach(group => {
@@ -1322,8 +1530,10 @@ export class MapUi {
         });
 
         this._graph = new Network(this._mapElement, {
-            nodes: this._nodes,
-            edges: this._edges
+            // nodes: this._nodes,
+            nodes: this._nodesView,
+            // edges: this._edges
+            edges: this._edgesView
         }, {
             groups
         });

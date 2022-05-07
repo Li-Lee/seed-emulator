@@ -245,3 +245,8 @@ label {
 #current-multiplier::after {
     content: 'x';
 }
+
+span.circuit-label {
+    text-indent: 5px;
+    display: inline-block;
+}

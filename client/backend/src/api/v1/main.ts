@@ -195,8 +195,24 @@ router.post('/sniff', express.json(), async function(req, res, next) {
     });
 
     currentSnifferFilter = req.body.filter ?? '';
+    const exp = currentSnifferFilter.split(':')
+    const containers = await getContainers();
 
-    await sniffer.sniff((await getContainers()).map(c => c.Id), currentSnifferFilter);
+    if (typeof exp[1] === 'undefined') {
+        await sniffer.sniff(containers.map(c => c.Id), exp[0]);
+    } else {
+        const targetNodes = containers.filter((c) => {
+            const displayName = c.Labels['org.seedsecuritylabs.seedemu.meta.displayname'];
+
+            if (typeof displayName !== 'undefined' 
+		&& displayName.toLowerCase().startsWith(exp[0].trim().toLowerCase())) {
+                return c.Id;
+            }
+        }).map(c => c.Id);
+
+        await sniffer.sniff(targetNodes, exp[1].trim());
+        await sniffer.sniff((containers.map(c => c.Id)).filter(c => !targetNodes.includes(c)), '');
+    }
 
     res.json({
         ok: true,
@@ -268,6 +284,58 @@ router.post('/container/:id/bgp/:peer', express.json(), async function (req, res
     let node = candidates[0];
 
     await controller.setBgpPeerState(node.Id, peer, req.body.status);
+
+    res.json({
+        ok: true
+    });
+
+    next();
+});
+
+router.get('/container/:id/tor/circuits', async function (req, res, next) {
+    let id = req.params.id;
+
+    var candidates = (await docker.listContainers())
+        .filter(c => c.Id.startsWith(id));
+
+    if (candidates.length != 1) {
+        res.json({
+            ok: false,
+            result: `no match or multiple match for container ID ${id}.`
+        });
+        next();
+        return;
+    }
+
+    let node = candidates[0];
+
+    res.json({
+        ok: true,
+        result: await controller.listTorCircuits(node.Id)
+    });
+
+    next();
+});
+
+router.post('/container/:id/tor/circuits/:circuit_id', express.json(), async function (req, res, next) {
+    let id = req.params.id;
+    let circuit_id = req.params.circuit_id;
+
+    var candidates = (await docker.listContainers())
+        .filter(c => c.Id.startsWith(id));
+
+    if (candidates.length != 1) {
+        res.json({
+            ok: false,
+            result: `no match or multiple match for container ID ${id}.`
+        });
+        next();
+        return;
+    }
+
+    let node = candidates[0];
+
+    await controller.updateTorCircuit(node.Id, circuit_id, req.body.action);
 
     res.json({
         ok: true

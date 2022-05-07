@@ -120,6 +120,8 @@ export class Controller implements LogProducer {
             // message should be completed by now. parse and resolve.
 
             try {
+                this._logger.warn(json);
+                // let result = JSON.parse(JSON.stringify(json)) as ExecutionResult;
                 let result = JSON.parse(json) as ExecutionResult;
 
                 if (result.id in this._unresolvedPromises) {
@@ -149,7 +151,8 @@ export class Controller implements LogProducer {
 
         let task = ++this._taskId;
 
-        this._logger.debug(`[task ${task}] running "${command}" on ${node}...`);
+        // this._logger.debug(`[task ${task}] running "${command}" on ${node}...`);
+        this._logger.warn(`[task ${task}] running "${command}" on ${node}...`);
         let session = await this._sessionManager.getSession(node, ['/seedemu_worker']);
 
         session.stream.write(`${task};${command}\r`);
@@ -260,6 +263,26 @@ export class Controller implements LogProducer {
 
         await this._run(node, `bird_peer_${state ? 'up' : 'down'} ${peer}`);
     }
+
+
+
+    async listTorCircuits(node: string): Promise<string> {
+        this._logger.debug(`getting tor circuits on ${node}...`);
+
+        let result = await this._run(node, 'list_tor_circuits');
+
+        let circuits = result.output;
+
+        return circuits;
+    }
+
+    async updateTorCircuit(node: string, circuit_id: string, action: string) {
+        this._logger.debug(`updating circuit ${circuit_id} on ${node} with action ${action}`);
+
+        await this._run(node, `update_tor_circuit ${circuit_id} ${action}`);
+    }
+
+
 
     getLoggers(): Logger[] {
         return [this._logger, this._sessionManager.getLoggers()[0]];

@@ -304,4 +304,12 @@ export class DataSource {
 
         return groups;
     }
+
+    async getTorCircuits(node: string): Promise<string> {
+        return (await this._load<string>('GET', `${this._apiBase}/container/${node}/tor/circuits`)).result;
+    }
+
+    async updateTorCircuit(node: string, circuit_id: string, action: string) {
+        await this._load('POST', `${this._apiBase}/container/${node}/tor/circuits/${circuit_id}`, JSON.stringify({ action: `${action}`}));
+    }
 }
