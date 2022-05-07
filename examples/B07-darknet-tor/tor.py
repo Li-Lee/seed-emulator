@@ -21,7 +21,7 @@ def main():
     listTorCircuits()
 
   if sys.argv[1] == "update_tor_circuit":
-    updateTorCircuit(sys.argv[2], sys.argv[3], sys.argv[4])
+    updateTorCircuit(sys.argv[2], sys.argv[3])
 
   controller.close()
 
@@ -56,7 +56,7 @@ def listTorCircuits():
 
   print(json.dumps(circuits))  
 
-def updateTorCircuit(circuit_id, action, parameter):
+def updateTorCircuit(circuit_id, action):
   if action == "close":
     controller.close_circuit(circuit_id)
     print("finish")
